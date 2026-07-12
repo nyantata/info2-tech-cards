@@ -29,3 +29,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 /* Card advisor navigation */
 #advisor-next:disabled{opacity:.42;cursor:not-allowed;transform:none;background:#64748b}
 #advisor-prev:disabled{opacity:.42;cursor:not-allowed;transform:none}
+
+/* v22: group / individual log and reusable basic profile */
+.record-mode-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem}
+.record-mode-option{position:relative;display:flex;align-items:center;gap:.9rem;border:2px solid #cbd5e1;border-radius:1.2rem;padding:1rem 3rem 1rem 1rem;background:#fff;cursor:pointer;transition:.18s}
+.record-mode-option:hover{border-color:#38bdf8;transform:translateY(-1px)}
+.record-mode-option input{position:absolute;opacity:0;pointer-events:none}
+.record-mode-option:has(input:checked){border-color:#0284c7;background:linear-gradient(135deg,#eff6ff,#f5f3ff);box-shadow:0 12px 30px rgba(14,165,233,.12)}
+.record-mode-icon{width:2.8rem;height:2.8rem;border-radius:.9rem;background:#f1f5f9;display:grid;place-items:center;color:#0f172a;flex:0 0 auto}
+.record-mode-option:has(input:checked) .record-mode-icon{background:#0284c7;color:#fff}
+.record-mode-option b{display:block;font-size:1rem}.record-mode-option small{display:block;margin-top:.2rem;color:#64748b;font-weight:700;line-height:1.5}
+.record-mode-check{position:absolute;right:1rem;top:50%;transform:translateY(-50%);color:#cbd5e1;font-size:1.2rem}
+.record-mode-option:has(input:checked) .record-mode-check{color:#0284c7}
+[data-group-only].hidden-by-mode{display:none!important}
+@media(max-width:640px){.record-mode-grid{grid-template-columns:1fr}}
