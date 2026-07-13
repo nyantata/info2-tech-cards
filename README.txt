@@ -1,9 +1,9 @@
-INFO II TECH CARDS v17
+INFO II TECH CARDS v23
 
 主な入口
 - index.html: 目的からカードを選ぶ
 - tech-cards.html: 全カード
-- submission.html: グループのログを提出
+- submission.html: グループまたは個人のログを提出（基本情報は前回入力を保持）
 - history.html: 自分が提出したログを確認
 - teacher.html: 教員用の指導・採点
 - setup.html: Googleログイン／スプレッドシート連携の設定
@@ -11,3 +11,25 @@ INFO II TECH CARDS v17
 Google連携を使うには assets/gas-config.js と gas/Code.gs の設定が必要です。
 
 更新: カード診断は選択後の自動遷移を廃止し、「次の質問へ」ボタンで進む方式に変更。
+
+
+v18: GAS送信後の完了通知がApps Scriptの多重iframe内で止まる場合に備え、parent/top/parent.parentへpostMessageを送信。20秒の確認タイムアウトも追加。
+
+v21 修正
+- Apps Scriptの履歴画面から「新しいログを記録」を押した際、GitHub Pagesをiframe内ではなくトップ画面で開くように修正。
+- これにより、GitHub Pages側のsessionStorageに保存された学校アカウントのログイン状態を引き継ぐ。
+- 「技術カードサイトへ戻る」もトップ画面へ遷移する。
+
+
+v22 修正
+- 基本情報（記録の種類、班・氏名、プロジェクト名、解決したい問題・問い）をブラウザに保存し、次回の新規ログへ自動入力。
+- グループ記録と個人記録を選択可能。
+- 提出ログシートに「記録区分」列を自動追加。
+- 提出完了後に、基本情報を残したまま次のログを開始できるボタンを追加。
+
+
+v23 全カード改修
+- 全15カードへ開閉式の詳しい図解、使う場面・注意する場面、読み取り例を追加。
+- IoTコード列名、異単位グラフ、UI/UXコードコピーを修正。
+- k-means、k-NN、決定木、因子分析、検証などのミニラボを可視化中心へ改善。
+- 印刷時は詳しい図解を展開。details-ui.jsで全開閉とURLハッシュ表示に対応。
