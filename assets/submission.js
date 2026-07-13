@@ -17,6 +17,9 @@ let profiles = loadJson(PROFILE_KEY, { lastMode: 'グループ', グループ: {
 let profileSaveTimer = null;
 
 const $ = id => document.getElementById(id);
+const CALENDAR_MIN_YEAR = 2000;
+let calendarViewYear = null;
+let calendarViewMonth = null;
 
 
 function toHalfWidthDigits(value) {
@@ -84,66 +87,248 @@ function setDateFieldState(message = '') {
   shell?.classList.toggle('valid', isValid);
 }
 
-function setRecordDateFromIso(iso) {
+function setRecordDateFromIso(iso, { closeCalendar = false } = {}) {
   const input = $('record-date');
-  const picker = $('record-date-picker');
   const display = isoToDisplayDate(iso);
   if (input) input.value = display;
-  if (picker) picker.value = iso;
   setDateFieldState(display ? '' : '記録日を確認してください');
+  const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    calendarViewYear = Number(match[1]);
+    calendarViewMonth = Number(match[2]) - 1;
+    renderRecordCalendar();
+  }
+  if (closeCalendar) closeRecordCalendar();
 }
 
 function syncDateControls({ normalize = false } = {}) {
   const input = $('record-date');
-  const picker = $('record-date-picker');
   if (!input) return false;
   if (normalize) input.value = normalizeDateText(input.value);
   const message = dateValidationMessage(input.value);
   setDateFieldState(message);
   const parsed = parseDisplayDate(input.value);
-  if (picker) picker.value = parsed.valid ? parsed.iso : '';
+  if (parsed.valid) {
+    calendarViewYear = parsed.date.getUTCFullYear();
+    calendarViewMonth = parsed.date.getUTCMonth();
+  }
   return !message;
 }
 
-function openNativeDatePicker() {
-  const picker = $('record-date-picker');
-  if (!picker) return;
-  picker.max = todayIsoInJapan();
-  try {
-    if (typeof picker.showPicker === 'function') picker.showPicker();
-    else picker.click();
-  } catch (_) {
-    picker.focus();
-    picker.click();
+function calendarTodayParts() {
+  const [year, month, day] = todayIsoInJapan().split('-').map(Number);
+  return { year, month: month - 1, day };
+}
+
+function selectedRecordIso() {
+  const parsed = parseDisplayDate($('record-date')?.value || '');
+  return parsed.valid ? parsed.iso : '';
+}
+
+function populateCalendarSelects() {
+  const yearSelect = $('calendar-year');
+  const monthSelect = $('calendar-month');
+  if (!yearSelect || !monthSelect) return;
+  const today = calendarTodayParts();
+  if (!yearSelect.options.length) {
+    for (let year = today.year; year >= CALENDAR_MIN_YEAR; year -= 1) {
+      yearSelect.add(new Option(String(year), String(year)));
+    }
   }
+  if (!monthSelect.options.length) {
+    for (let month = 1; month <= 12; month += 1) {
+      monthSelect.add(new Option(String(month), String(month - 1)));
+    }
+  }
+}
+
+function renderRecordCalendar() {
+  const daysRoot = $('calendar-days');
+  const yearSelect = $('calendar-year');
+  const monthSelect = $('calendar-month');
+  const prevButton = $('calendar-prev');
+  const nextButton = $('calendar-next');
+  if (!daysRoot || !yearSelect || !monthSelect || !prevButton || !nextButton) return;
+
+  populateCalendarSelects();
+  const today = calendarTodayParts();
+  if (!Number.isInteger(calendarViewYear)) calendarViewYear = today.year;
+  if (!Number.isInteger(calendarViewMonth)) calendarViewMonth = today.month;
+  if (calendarViewYear < CALENDAR_MIN_YEAR) calendarViewYear = CALENDAR_MIN_YEAR;
+  if (calendarViewYear > today.year || (calendarViewYear === today.year && calendarViewMonth > today.month)) {
+    calendarViewYear = today.year;
+    calendarViewMonth = today.month;
+  }
+
+  yearSelect.value = String(calendarViewYear);
+  Array.from(monthSelect.options).forEach(option => {
+    option.disabled = calendarViewYear === today.year && Number(option.value) > today.month;
+  });
+  if (calendarViewYear === today.year && calendarViewMonth > today.month) calendarViewMonth = today.month;
+  monthSelect.value = String(calendarViewMonth);
+
+  const selectedIso = selectedRecordIso();
+  const todayIso = todayIsoInJapan();
+  const firstWeekday = new Date(Date.UTC(calendarViewYear, calendarViewMonth, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(calendarViewYear, calendarViewMonth + 1, 0)).getUTCDate();
+  const previousMonthDays = new Date(Date.UTC(calendarViewYear, calendarViewMonth, 0)).getUTCDate();
+  daysRoot.replaceChildren();
+
+  for (let cell = 0; cell < 42; cell += 1) {
+    const offsetDay = cell - firstWeekday + 1;
+    let year = calendarViewYear;
+    let month = calendarViewMonth;
+    let day = offsetDay;
+    let outside = false;
+    if (offsetDay < 1) {
+      outside = true;
+      month -= 1;
+      if (month < 0) { month = 11; year -= 1; }
+      day = previousMonthDays + offsetDay;
+    } else if (offsetDay > daysInMonth) {
+      outside = true;
+      day = offsetDay - daysInMonth;
+      month += 1;
+      if (month > 11) { month = 0; year += 1; }
+    }
+    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'calendar-day';
+    button.textContent = String(day);
+    button.dataset.iso = iso;
+    button.setAttribute('role', 'gridcell');
+    button.setAttribute('aria-label', `${year}年${month + 1}月${day}日`);
+    if (outside) button.classList.add('outside-month');
+    if (iso === todayIso) button.classList.add('today');
+    if (iso === selectedIso) {
+      button.classList.add('selected');
+      button.setAttribute('aria-selected', 'true');
+    }
+    if (iso > todayIso || year < CALENDAR_MIN_YEAR) {
+      button.disabled = true;
+      button.setAttribute('aria-disabled', 'true');
+    } else {
+      button.addEventListener('click', () => setRecordDateFromIso(iso, { closeCalendar: true }));
+    }
+    daysRoot.append(button);
+  }
+
+  prevButton.disabled = calendarViewYear === CALENDAR_MIN_YEAR && calendarViewMonth === 0;
+  nextButton.disabled = calendarViewYear === today.year && calendarViewMonth === today.month;
+}
+
+function isRecordCalendarOpen() {
+  return !$('record-date-calendar')?.classList.contains('hidden');
+}
+
+function openRecordCalendar() {
+  const popover = $('record-date-calendar');
+  const input = $('record-date');
+  const button = $('open-calendar');
+  const shell = $('date-input-shell');
+  if (!popover || !input || !button || !shell) return;
+  const parsed = parseDisplayDate(input.value);
+  if (parsed.valid) {
+    calendarViewYear = parsed.date.getUTCFullYear();
+    calendarViewMonth = parsed.date.getUTCMonth();
+  } else {
+    const today = calendarTodayParts();
+    calendarViewYear = today.year;
+    calendarViewMonth = today.month;
+  }
+  renderRecordCalendar();
+  popover.classList.remove('hidden');
+  shell.classList.add('calendar-open');
+  input.setAttribute('aria-expanded', 'true');
+  button.setAttribute('aria-expanded', 'true');
+}
+
+function closeRecordCalendar({ returnFocus = false } = {}) {
+  const popover = $('record-date-calendar');
+  const input = $('record-date');
+  const button = $('open-calendar');
+  const shell = $('date-input-shell');
+  if (!popover || !input || !button || !shell) return;
+  popover.classList.add('hidden');
+  shell.classList.remove('calendar-open');
+  input.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-expanded', 'false');
+  if (returnFocus) input.focus();
+}
+
+function shiftCalendarMonth(amount) {
+  const date = new Date(Date.UTC(calendarViewYear, calendarViewMonth + amount, 1));
+  calendarViewYear = date.getUTCFullYear();
+  calendarViewMonth = date.getUTCMonth();
+  renderRecordCalendar();
 }
 
 function initDateControls() {
   const input = $('record-date');
-  const picker = $('record-date-picker');
   const todayButton = $('set-today');
   const calendarButton = $('open-calendar');
-  if (!input || !picker || !todayButton || !calendarButton) return;
+  const shell = $('date-input-shell');
+  const yearSelect = $('calendar-year');
+  const monthSelect = $('calendar-month');
+  const prevButton = $('calendar-prev');
+  const nextButton = $('calendar-next');
+  const calendarTodayButton = $('calendar-today');
+  const closeButton = $('calendar-close');
+  if (!input || !todayButton || !calendarButton || !shell || !yearSelect || !monthSelect || !prevButton || !nextButton || !calendarTodayButton || !closeButton) return;
 
-  picker.max = todayIsoInJapan();
+  populateCalendarSelects();
   if (!String(input.value || '').trim()) setRecordDateFromIso(todayIsoInJapan());
   else syncDateControls({ normalize: true });
 
-  picker.addEventListener('change', () => {
-    if (picker.value) setRecordDateFromIso(picker.value);
-  });
   todayButton.addEventListener('click', () => setRecordDateFromIso(todayIsoInJapan()));
-  calendarButton.addEventListener('click', openNativeDatePicker);
-  input.addEventListener('click', openNativeDatePicker);
+  calendarTodayButton.addEventListener('click', () => setRecordDateFromIso(todayIsoInJapan(), { closeCalendar: true }));
+  calendarButton.addEventListener('click', event => {
+    event.stopPropagation();
+    if (isRecordCalendarOpen()) closeRecordCalendar({ returnFocus: true });
+    else openRecordCalendar();
+  });
+  input.addEventListener('click', () => openRecordCalendar());
+  input.addEventListener('keydown', event => {
+    if ((event.key === 'ArrowDown' && event.altKey) || event.key === 'Enter') {
+      event.preventDefault();
+      openRecordCalendar();
+    } else if (event.key === 'Escape') {
+      closeRecordCalendar();
+    }
+  });
   input.addEventListener('input', () => {
     input.removeAttribute('aria-invalid');
     $('record-date-error').textContent = '';
     $('record-date-error').classList.add('hidden');
     input.closest('.date-input-shell')?.classList.remove('valid');
     const parsed = parseDisplayDate(input.value);
-    picker.value = parsed.valid ? parsed.iso : '';
+    if (parsed.valid) {
+      calendarViewYear = parsed.date.getUTCFullYear();
+      calendarViewMonth = parsed.date.getUTCMonth();
+      if (isRecordCalendarOpen()) renderRecordCalendar();
+    }
   });
   input.addEventListener('blur', () => syncDateControls({ normalize: true }));
+
+  prevButton.addEventListener('click', () => shiftCalendarMonth(-1));
+  nextButton.addEventListener('click', () => shiftCalendarMonth(1));
+  yearSelect.addEventListener('change', () => {
+    calendarViewYear = Number(yearSelect.value);
+    const today = calendarTodayParts();
+    if (calendarViewYear === today.year && calendarViewMonth > today.month) calendarViewMonth = today.month;
+    renderRecordCalendar();
+  });
+  monthSelect.addEventListener('change', () => {
+    calendarViewMonth = Number(monthSelect.value);
+    renderRecordCalendar();
+  });
+  closeButton.addEventListener('click', () => closeRecordCalendar({ returnFocus: true }));
+  shell.addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('click', () => closeRecordCalendar());
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && isRecordCalendarOpen()) closeRecordCalendar({ returnFocus: true });
+  });
 }
 
 function loadJson(key, fallback) {
