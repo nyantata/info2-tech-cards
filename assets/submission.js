@@ -4,7 +4,7 @@ const DRAFT_KEY = 'info2_submission_draft';
 const PROFILE_KEY = 'info2_submission_profiles';
 const BASIC_FIELDS = ['group', 'representative', 'members', 'project', 'problem'];
 const ACTIVITY_FIELDS = [
-  'cardReason', 'rows', 'source', 'period', 'unit', 'dataCare', 'process', 'artifact',
+  'recordDate', 'cardReason', 'rows', 'source', 'period', 'unit', 'dataCare', 'process', 'artifact',
   'result', 'claim', 'limit', 'decision', 'next', 'help'
 ];
 
@@ -17,6 +17,134 @@ let profiles = loadJson(PROFILE_KEY, { lastMode: 'グループ', グループ: {
 let profileSaveTimer = null;
 
 const $ = id => document.getElementById(id);
+
+
+function toHalfWidthDigits(value) {
+  return String(value || '').replace(/[０-９]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+}
+
+function todayIsoInJapan() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date()).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function isoToDisplayDate(iso) {
+  const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}/${match[2]}/${match[3]}` : '';
+}
+
+function normalizeDateText(value) {
+  let text = toHalfWidthDigits(value).trim().replace(/[／]/g, '/').replace(/[.．\-－−]/g, '/');
+  if (/^\d{8}$/.test(text)) text = `${text.slice(0, 4)}/${text.slice(4, 6)}/${text.slice(6, 8)}`;
+  const match = text.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return text;
+  return `${match[1]}/${String(Number(match[2])).padStart(2, '0')}/${String(Number(match[3])).padStart(2, '0')}`;
+}
+
+function parseDisplayDate(value) {
+  const normalized = normalizeDateText(value);
+  const match = normalized.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (!match) return { valid: false, normalized, reason: 'format' };
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return { valid: false, normalized, reason: 'calendar' };
+  }
+  const iso = `${match[1]}-${match[2]}-${match[3]}`;
+  if (iso > todayIsoInJapan()) return { valid: false, normalized, iso, reason: 'future' };
+  return { valid: true, normalized, iso, date };
+}
+
+function dateValidationMessage(value) {
+  if (!String(value || '').trim()) return '記録日を入力してください';
+  const parsed = parseDisplayDate(value);
+  if (parsed.valid) return '';
+  if (parsed.reason === 'format') return '記録日は yyyy/MM/dd の形式で入力してください';
+  if (parsed.reason === 'calendar') return '存在する日付を入力してください';
+  if (parsed.reason === 'future') return '記録日に未来の日付は指定できません';
+  return '記録日を確認してください';
+}
+
+function setDateFieldState(message = '') {
+  const input = $('record-date');
+  const error = $('record-date-error');
+  const shell = input?.closest('.date-input-shell');
+  if (!input || !error) return;
+  const isValid = !message && Boolean(input.value);
+  input.setAttribute('aria-invalid', message ? 'true' : 'false');
+  error.textContent = message;
+  error.classList.toggle('hidden', !message);
+  shell?.classList.toggle('valid', isValid);
+}
+
+function setRecordDateFromIso(iso) {
+  const input = $('record-date');
+  const picker = $('record-date-picker');
+  const display = isoToDisplayDate(iso);
+  if (input) input.value = display;
+  if (picker) picker.value = iso;
+  setDateFieldState(display ? '' : '記録日を確認してください');
+}
+
+function syncDateControls({ normalize = false } = {}) {
+  const input = $('record-date');
+  const picker = $('record-date-picker');
+  if (!input) return false;
+  if (normalize) input.value = normalizeDateText(input.value);
+  const message = dateValidationMessage(input.value);
+  setDateFieldState(message);
+  const parsed = parseDisplayDate(input.value);
+  if (picker) picker.value = parsed.valid ? parsed.iso : '';
+  return !message;
+}
+
+function openNativeDatePicker() {
+  const picker = $('record-date-picker');
+  if (!picker) return;
+  picker.max = todayIsoInJapan();
+  try {
+    if (typeof picker.showPicker === 'function') picker.showPicker();
+    else picker.click();
+  } catch (_) {
+    picker.focus();
+    picker.click();
+  }
+}
+
+function initDateControls() {
+  const input = $('record-date');
+  const picker = $('record-date-picker');
+  const todayButton = $('set-today');
+  const calendarButton = $('open-calendar');
+  if (!input || !picker || !todayButton || !calendarButton) return;
+
+  picker.max = todayIsoInJapan();
+  if (!String(input.value || '').trim()) setRecordDateFromIso(todayIsoInJapan());
+  else syncDateControls({ normalize: true });
+
+  picker.addEventListener('change', () => {
+    if (picker.value) setRecordDateFromIso(picker.value);
+  });
+  todayButton.addEventListener('click', () => setRecordDateFromIso(todayIsoInJapan()));
+  calendarButton.addEventListener('click', openNativeDatePicker);
+  input.addEventListener('click', openNativeDatePicker);
+  input.addEventListener('input', () => {
+    input.removeAttribute('aria-invalid');
+    $('record-date-error').textContent = '';
+    $('record-date-error').classList.add('hidden');
+    input.closest('.date-input-shell')?.classList.remove('valid');
+    const parsed = parseDisplayDate(input.value);
+    picker.value = parsed.valid ? parsed.iso : '';
+  });
+  input.addEventListener('blur', () => syncDateControls({ normalize: true }));
+}
 
 function loadJson(key, fallback) {
   try {
@@ -47,6 +175,7 @@ function getData() {
     }
   }
   data.cards = data.cards || [];
+  data.recordDate = normalizeDateText(data.recordDate || '');
   data.mode = selectedMode();
   if (data.mode === '個人') {
     data.group = '';
@@ -151,6 +280,7 @@ function advisorFill() {
 function validate() {
   const missing = [];
   for (const input of form.querySelectorAll('[required]')) {
+    if (input.name === 'recordDate') continue;
     if (input.closest('.hidden-by-mode')) continue;
     if (!String(input.value || '').trim()) {
       missing.push(input.previousElementSibling?.textContent?.replace('*', '').trim() || input.name);
@@ -159,6 +289,9 @@ function validate() {
       input.removeAttribute('aria-invalid');
     }
   }
+  const dateMessage = dateValidationMessage(form.elements.recordDate?.value);
+  setDateFieldState(dateMessage);
+  if (dateMessage) missing.push(dateMessage);
   if (!form.querySelector('[name="cards"]:checked')) missing.push('利用したカード');
   if (!idToken) missing.push('学校のGoogleアカウントでのログイン');
   return [...new Set(missing)];
@@ -173,7 +306,8 @@ function esc(value) {
 function confirmHtml(data) {
   const rows = [
     ['提出者', data.submittedBy],
-    ['記録の種類', data.mode]
+    ['記録の種類', data.mode],
+    ['記録日', data.recordDate]
   ];
   if (data.mode === 'グループ') {
     rows.push(['班番号・班名', data.group], ['代表者氏名', data.representative], ['班員氏名', data.members]);
@@ -325,6 +459,7 @@ function clearActivityFields() {
     if (input && 'value' in input) input.value = '';
   });
   form.elements.dataType.value = '公式データ';
+  setRecordDateFromIso(todayIsoInJapan());
   localStorage.removeItem(DRAFT_KEY);
 }
 
@@ -365,6 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fill(draft);
     applyMode(draft.mode || initialMode, { loadSaved: false });
   }
+  initDateControls();
 
   const query = new URLSearchParams(location.search);
   if (query.get('from') === 'advisor') advisorFill();

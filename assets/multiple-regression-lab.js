@@ -12,7 +12,7 @@
     const n=A.length,M=A.map((r,i)=>[...r,...Array.from({length:n},(_,j)=>i===j?1:0)]);
     for(let i=0;i<n;i++){
       let p=i; for(let r=i+1;r<n;r++) if(Math.abs(M[r][i])>Math.abs(M[p][i])) p=r;
-      if(Math.abs(M[p][i])<1e-10) throw new Error('行列がほぼ特異です');
+      if(Math.abs(M[p][i])<1e-10) throw new Error('説明変数どうしが似すぎて計算できません');
       [M[i],M[p]]=[M[p],M[i]];
       const d=M[i][i]; for(let j=0;j<2*n;j++) M[i][j]/=d;
       for(let r=0;r<n;r++) if(r!==i){const f=M[r][i];for(let j=0;j<2*n;j++)M[r][j]-=f*M[i][j]}
@@ -85,7 +85,7 @@
     const b1=[],b2=[];for(let s=1;s<=18;s++){const b=collinearityTrial(rho,100+s);b1.push(b[0]);b2.push(b[1])}
     const sd1=stdev(b1),sd2=stdev(b2);$('mr-b1-sd').textContent=sd1.toFixed(3);$('mr-b2-sd').textContent=sd2.toFixed(3);
     $('mr-collinearity-message').textContent=rho>.85?'説明変数が非常によく似ています。合計としての予測はできても、個々の係数の解釈は不安定になりやすい状態です。':rho>.55?'相関が強まり、係数のばらつきが増え始めています。':'説明変数の重なりは比較的小さい状態です。';
-    makeChart('mr-collinearity-chart','line',{labels:Array.from({length:18},(_,i)=>`試行${i+1}`),datasets:[{label:'係数1',data:b1,borderColor:'#38bdf8',backgroundColor:'#38bdf8',tension:.25},{label:'係数2',data:b2,borderColor:'#f59e0b',backgroundColor:'#f59e0b',tension:.25}]},{scales:{y:{title:{display:true,text:'推定係数'}}}})
+    makeChart('mr-collinearity-chart','line',{labels:Array.from({length:18},(_,i)=>`試行${i+1}`),datasets:[{label:'係数1',data:b1,borderColor:'#38bdf8',backgroundColor:'#38bdf8',tension:.25},{label:'係数2',data:b2,borderColor:'#f59e0b',backgroundColor:'#f59e0b',tension:.25}]},{scales:{y:{title:{display:true,text:'計算された係数'}}}})
   }
   function initTabs(){document.querySelectorAll('[data-mr-tab]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-mr-tab]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.mr-tab-panel').forEach(p=>p.hidden=true);$(btn.dataset.mrTab).hidden=false;setTimeout(()=>window.dispatchEvent(new Event('resize')),50)}))}
   window.initMultipleRegressionLab=function(){

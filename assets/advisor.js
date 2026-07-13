@@ -6,7 +6,7 @@ const Q=[
  {id:'output',title:'最終的に何を出したいですか？',sub:'成果物の中心に近いものを選びます。',multi:false,options:[
   ['graph','グラフと説明','fa-chart-simple'],['number','数値の予測','fa-calculator'],['label','分類結果','fa-tags'],['clusters','似たデータのグループ','fa-object-group'],['factors','アンケート項目の背後にある特徴','fa-circle-nodes'],['prototype','動く試作品・画面','fa-laptop-code'],['story','根拠のある発表','fa-person-chalkboard']]},
  {id:'structure',title:'データの形はどれに近いですか？',sub:'分からない場合は「まだ分からない」で大丈夫です。',multi:false,options:[
-  ['one','1つの数値Xと1つの数値Y','fa-arrow-trend-up'],['many','複数の入力Xと1つの数値Y','fa-chart-line'],['labeled','正解ラベル付きのデータ','fa-tags'],['unlabeled','正解ラベルのないデータ','fa-circle-nodes'],['items','複数のアンケート項目','fa-list-check'],['unknown','まだ分からない','fa-circle-question']]},
+  ['one','1つの数値Xと1つの数値Y','fa-arrow-trend-up'],['many','複数の入力Xと1つの数値Y','fa-chart-line'],['labeled','正解の分類名が付いたデータ','fa-tags'],['unlabeled','正解の分類名がないデータ','fa-circle-nodes'],['items','複数のアンケート項目','fa-list-check'],['unknown','まだ分からない','fa-circle-question']]},
  {id:'support',title:'今、特に必要な支援はどれですか？',sub:'まず優先したいものを1つ選びます。ほかのカードは結果画面から追加できます。',multi:false,options:[
   ['basic','基礎から順に学びたい','fa-stairs'],['code','Pythonコードを動かしたい','fa-code'],['design','UIや仕組みも作りたい','fa-pen-ruler'],['ai','生成AIを補助に使いたい','fa-wand-magic-sparkles'],['evaluation','評価方法をしっかり確認したい','fa-shield-halved'],['presentation','最後に発表したい','fa-person-chalkboard']]}
 ];
@@ -45,8 +45,8 @@ function recommend(){
  if(g==='explore'||o==='graph')add(req,'visualization','データの分布・時間変化・関係を最初に確認する');
  if(g==='predict'||o==='number'||st==='one'||st==='many'){add(req,'visualization','モデル作成前に散布図や分布を確認する');add(req,'regression','目的変数・説明変数・回帰係数の基礎を学ぶ');if(st==='many')add(req,'multiple-regression','複数の説明変数を使うモデルを作る')}
  if(g==='classify'||o==='label'||st==='labeled'){add(req,'visualization','特徴量とクラスの分布を確認する');add(req,'knn','距離にもとづく分類の基本を試す');add(support,'decision-tree','条件分岐が見える分類方法と比較する')}
- if(g==='group'||o==='clusters'||st==='unlabeled'){add(req,'visualization','グループ分け前に特徴量の分布を確認する');add(req,'kmeans','正解ラベルなしで似たデータを分ける')}
- if(g==='survey'||s==='survey'||st==='items'||o==='factors'){add(req,'survey','質問文・尺度・対象・偏りを設計する');add(req,'visualization','回答分布と項目間の関係を確認する');if(st==='items'||o==='factors')add(req,'factor','複数項目の背後にある共通因子を検討する')}
+ if(g==='group'||o==='clusters'||st==='unlabeled'){add(req,'visualization','グループ分け前に特徴量の分布を確認する');add(req,'kmeans','正解の分類名なしで似たデータを分ける')}
+ if(g==='survey'||s==='survey'||st==='items'||o==='factors'){add(req,'survey','質問文・回答の段階・対象者・偏りを設計する');add(req,'visualization','回答分布と項目間の関係を確認する');if(st==='items'||o==='factors')add(req,'factor','複数項目の背後にある共通因子を検討する')}
  if(g==='system'||o==='prototype'||sp==='design'){add(req,'product-analysis','利用者・目的・データの流れを整理する');add(req,'uiux','利用者の操作とフィードバックを試作する')}
  if(s==='official')add(support,'visualization','公式データの単位・年次・分布を確認する');
  if(sp==='ai')add(support,'ai','コード・説明・発想の補助として、検証方法とセットで使う');
