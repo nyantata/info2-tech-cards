@@ -1,4 +1,4 @@
-INFO II TECH CARDS v25
+INFO II TECH CARDS v28
 
 主な入口
 - index.html: 目的からカードを選ぶ
@@ -51,3 +51,23 @@ v24 全カード改修
 - 同梱CSVを使う4つのコード例について、パスを assets/data/SSDSE-E-2026.csv に統一。
 - Chromium上で全カードのミニラボと確認問題を確認。Pythonコード14本も実行確認済み。
 - 詳細は VALIDATION_v25.md を参照。
+
+【重要：Google連携設定を更新時に保持する】
+assets/gas-config.js は学校ごとの運用設定ファイルです。
+サイト更新時に上書き・削除しないでください。
+新規導入時は assets/gas-config.example.js をコピーして gas-config.js を作成します。
+既存運用では GitHub の更新履歴から直前の gas-config.js を復元できます。
+
+
+v27: 記録日のカレンダーをブラウザ依存の非表示date入力から、HTML/CSS/JavaScript製のカレンダーへ変更。入力欄・カレンダーアイコンのどちらからでも開けます。assets/gas-config.jsは配布物に含めず、既存設定を保持してください。
+
+
+[v28 画像アップロード]
+- ログ1件につきJPEG・PNG・WebPを最大3枚添付可能。
+- ブラウザ内で長辺1600px以内、1枚約1.5MB以内を目安に縮小・圧縮。
+- 画像本体は先生のGoogle Drive、管理情報は「添付画像」シートへ保存。
+- 自分のログにサムネイルを表示し、提出者本人はDriveで元画像を確認可能。
+- 送信識別子と画像識別子を使い、同じ提出の再送信時にログ行・画像ファイルを重複作成しない。
+- 途中失敗時は「画像アップロード状態」を「再試行が必要」とし、同じ画面から再送信して不足分を保存。
+- Google Drive権限を追加したため、gas/appsscript.jsonとCode.gsを更新し、Apps Scriptを新バージョンとして再デプロイする。
+- assets/gas-config.jsは学校固有設定のため、更新時に上書き・削除しない。
