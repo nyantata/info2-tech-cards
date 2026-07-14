@@ -16,6 +16,16 @@ let activeMode = 'グループ';
 let profiles = loadJson(PROFILE_KEY, { lastMode: 'グループ', グループ: {}, 個人: {} });
 let profileSaveTimer = null;
 
+const MAX_IMAGES = 3;
+const MAX_IMAGE_DIMENSION = 1600;
+const MAX_COMPRESSED_IMAGE_BYTES = 1_500_000;
+const MAX_TOTAL_IMAGE_BYTES = 4_500_000;
+const MAX_ORIGINAL_IMAGE_BYTES = 20_000_000;
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+let selectedImages = [];
+let imageProcessing = false;
+let clientSubmissionId = createClientSubmissionId();
+
 const $ = id => document.getElementById(id);
 const CALENDAR_MIN_YEAR = 2000;
 let calendarViewYear = null;
@@ -331,6 +341,326 @@ function initDateControls() {
   });
 }
 
+
+function createClientSubmissionId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const random = Math.random().toString(36).slice(2);
+  return `client-${Date.now()}-${random}`;
+}
+
+function formatBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function setImageStatus(message = '', type = 'info') {
+  const status = $('image-upload-status');
+  if (!status) return;
+  status.textContent = message;
+  status.className = `status-banner ${type} mt-4${message ? '' : ' hidden'}`;
+}
+
+function imageExtension(mimeType) {
+  if (mimeType === 'image/png') return 'png';
+  if (mimeType === 'image/webp') return 'webp';
+  return 'jpg';
+}
+
+function sanitizeImageBaseName(name) {
+  const stem = String(name || 'image').replace(/\.[^.]+$/, '');
+  const normalized = stem.normalize('NFKC').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+  return (normalized || 'image').slice(0, 70);
+}
+
+function loadImageElement(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`${file.name}を画像として読み込めませんでした。`));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function canvasToBlob(canvas, mimeType, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('画像の圧縮に失敗しました。'));
+    }, mimeType, quality);
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('画像データを読み取れませんでした。'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function encodeCompressedImage(image, width, height, originalType, originalSize) {
+  let currentWidth = width;
+  let currentHeight = height;
+  let quality = 0.86;
+  let mimeType = originalType === 'image/webp' ? 'image/webp' : 'image/jpeg';
+
+  // 小さなPNGは文字や図の輪郭を保つため、まずPNGのまま縮小を試す。
+  if (originalType === 'image/png' && originalSize <= MAX_COMPRESSED_IMAGE_BYTES) mimeType = 'image/png';
+
+  for (let attempt = 0; attempt < 9; attempt += 1) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(currentWidth));
+    canvas.height = Math.max(1, Math.round(currentHeight));
+    const context = canvas.getContext('2d', { alpha: mimeType === 'image/png' });
+    if (!context) throw new Error('画像処理を開始できませんでした。');
+    if (mimeType !== 'image/png') {
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await canvasToBlob(canvas, mimeType, mimeType === 'image/png' ? undefined : quality);
+    if (blob.size <= MAX_COMPRESSED_IMAGE_BYTES) {
+      return { blob, width: canvas.width, height: canvas.height, mimeType: blob.type || mimeType };
+    }
+
+    if (mimeType === 'image/png') {
+      mimeType = 'image/jpeg';
+      quality = 0.84;
+      continue;
+    }
+    if (quality > 0.58) {
+      quality -= 0.08;
+    } else {
+      currentWidth *= 0.84;
+      currentHeight *= 0.84;
+      quality = 0.78;
+    }
+  }
+  throw new Error('画像を送信できる大きさまで圧縮できませんでした。別の画像を選んでください。');
+}
+
+async function imageContentId(blob) {
+  try {
+    if (window.crypto?.subtle && blob.arrayBuffer) {
+      const digest = await window.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+      const hex = Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, '0')).join('');
+      return `img-${hex.slice(0, 40)}`;
+    }
+  } catch (_) {}
+  return window.crypto?.randomUUID ? `img-${window.crypto.randomUUID()}` : `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function compressImage(file) {
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    throw new Error(`${file.name}は対応していない形式です。JPEG・PNG・WebPを選んでください。`);
+  }
+  if (file.size > MAX_ORIGINAL_IMAGE_BYTES) {
+    throw new Error(`${file.name}は元のファイルサイズが大きすぎます。20MB以下の画像を選んでください。`);
+  }
+
+  const image = await loadImageElement(file);
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  if (!naturalWidth || !naturalHeight) throw new Error(`${file.name}の大きさを確認できませんでした。`);
+
+  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(naturalWidth, naturalHeight));
+  const targetWidth = Math.max(1, Math.round(naturalWidth * scale));
+  const targetHeight = Math.max(1, Math.round(naturalHeight * scale));
+  const encoded = await encodeCompressedImage(image, targetWidth, targetHeight, file.type, file.size);
+  const dataUrl = await blobToDataUrl(encoded.blob);
+  const id = await imageContentId(encoded.blob);
+  const extension = imageExtension(encoded.mimeType);
+  return {
+    id,
+    originalName: file.name,
+    storedName: `${sanitizeImageBaseName(file.name)}.${extension}`,
+    originalSize: file.size,
+    size: encoded.blob.size,
+    mimeType: encoded.mimeType,
+    width: encoded.width,
+    height: encoded.height,
+    dataUrl
+  };
+}
+
+function totalSelectedImageBytes() {
+  return selectedImages.reduce((sum, image) => sum + Number(image.size || 0), 0);
+}
+
+function renderImagePreviews() {
+  const root = $('image-preview-grid');
+  const clearButton = $('clear-images');
+  if (!root) return;
+  root.replaceChildren();
+
+  if (!selectedImages.length) {
+    const empty = document.createElement('p');
+    empty.className = 'image-preview-empty';
+    empty.textContent = '画像はまだ選ばれていません。';
+    root.append(empty);
+    if (clearButton) clearButton.disabled = true;
+    return;
+  }
+
+  selectedImages.forEach((image, index) => {
+    const card = document.createElement('article');
+    card.className = 'image-preview-card';
+    const img = document.createElement('img');
+    img.src = image.dataUrl;
+    img.alt = `提出画像${index + 1}のプレビュー`;
+    const body = document.createElement('div');
+    body.className = 'image-preview-body';
+    const name = document.createElement('b');
+    name.textContent = image.originalName;
+    const meta = document.createElement('p');
+    meta.textContent = `${image.width}×${image.height}px／${formatBytes(image.size)}`;
+    const reduction = document.createElement('p');
+    reduction.className = 'image-preview-reduction';
+    const percent = image.originalSize > 0 ? Math.max(0, Math.round((1 - image.size / image.originalSize) * 100)) : 0;
+    reduction.textContent = image.size < image.originalSize ? `元画像から約${percent}%小さくしました` : '送信に適した大きさです';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'image-remove-button';
+    remove.setAttribute('aria-label', `${image.originalName}を提出画像から外す`);
+    remove.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+    remove.addEventListener('click', () => {
+      selectedImages = selectedImages.filter(item => item.id !== image.id);
+      renderImagePreviews();
+      setImageStatus(selectedImages.length ? `${selectedImages.length}枚を選択中（合計${formatBytes(totalSelectedImageBytes())}）` : '', 'info');
+    });
+    body.append(name, meta, reduction);
+    card.append(img, body, remove);
+    root.append(card);
+  });
+
+  const summary = document.createElement('div');
+  summary.className = 'image-preview-summary';
+  summary.textContent = `${selectedImages.length}枚／合計 ${formatBytes(totalSelectedImageBytes())}`;
+  root.append(summary);
+  if (clearButton) clearButton.disabled = false;
+}
+
+async function addImageFiles(fileList) {
+  if (imageProcessing) return;
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  imageProcessing = true;
+  setImageStatus('画像を読み込み、送信用に圧縮しています。', 'info');
+
+  const errors = [];
+  try {
+    for (const file of files) {
+      if (selectedImages.length >= MAX_IMAGES) {
+        errors.push(`画像は最大${MAX_IMAGES}枚までです。`);
+        break;
+      }
+      try {
+        const compressed = await compressImage(file);
+        if (selectedImages.some(image => image.id === compressed.id)) {
+          errors.push(`${file.name}はすでに選ばれています。`);
+          continue;
+        }
+        const nextTotal = totalSelectedImageBytes() + compressed.size;
+        if (nextTotal > MAX_TOTAL_IMAGE_BYTES) {
+          errors.push(`${file.name}を追加すると画像全体が大きくなりすぎます。別の画像を選ぶか、枚数を減らしてください。`);
+          continue;
+        }
+        selectedImages.push(compressed);
+        renderImagePreviews();
+      } catch (error) {
+        errors.push(error?.message || `${file.name}を処理できませんでした。`);
+      }
+    }
+  } finally {
+    imageProcessing = false;
+    const fileInput = $('record-images');
+    const cameraInput = $('camera-image');
+    if (fileInput) fileInput.value = '';
+    if (cameraInput) cameraInput.value = '';
+  }
+
+  if (errors.length) {
+    setImageStatus(errors.join(' '), 'error');
+  } else {
+    setImageStatus(`${selectedImages.length}枚を選択中（合計${formatBytes(totalSelectedImageBytes())}）。提出前に画像の内容を確認してください。`, 'ok');
+  }
+}
+
+function clearSelectedImages() {
+  selectedImages = [];
+  renderImagePreviews();
+  setImageStatus('', 'info');
+  const fileInput = $('record-images');
+  const cameraInput = $('camera-image');
+  if (fileInput) fileInput.value = '';
+  if (cameraInput) cameraInput.value = '';
+}
+
+function attachmentPayload() {
+  return selectedImages.map(image => {
+    const comma = image.dataUrl.indexOf(',');
+    return {
+      clientImageId: image.id,
+      originalName: image.originalName,
+      storedName: image.storedName,
+      mimeType: image.mimeType,
+      size: image.size,
+      originalSize: image.originalSize,
+      width: image.width,
+      height: image.height,
+      dataBase64: comma >= 0 ? image.dataUrl.slice(comma + 1) : ''
+    };
+  });
+}
+
+function initImageControls() {
+  const fileInput = $('record-images');
+  const cameraInput = $('camera-image');
+  const dropzone = $('image-dropzone');
+  const clearButton = $('clear-images');
+
+  fileInput?.addEventListener('change', () => addImageFiles(fileInput.files));
+  cameraInput?.addEventListener('change', () => addImageFiles(cameraInput.files));
+  clearButton?.addEventListener('click', clearSelectedImages);
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', event => {
+      if (event.target.closest('button, label, input')) return;
+      fileInput.click();
+    });
+    dropzone.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        fileInput.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(type => {
+      dropzone.addEventListener(type, event => {
+        event.preventDefault();
+        dropzone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(type => {
+      dropzone.addEventListener(type, event => {
+        event.preventDefault();
+        dropzone.classList.remove('dragover');
+      });
+    });
+    dropzone.addEventListener('drop', event => addImageFiles(event.dataTransfer?.files));
+  }
+  renderImagePreviews();
+}
+
 function loadJson(key, fallback) {
   try {
     const value = JSON.parse(localStorage.getItem(key) || 'null');
@@ -348,7 +678,7 @@ function selectedMode() {
   return form.querySelector('[name="mode"]:checked')?.value || 'グループ';
 }
 
-function getData() {
+function getData({ includeImages = false } = {}) {
   const fd = new FormData(form);
   const data = {};
   for (const [key, value] of fd.entries()) {
@@ -367,6 +697,9 @@ function getData() {
     data.members = '';
   }
   data.submittedBy = signedUser?.email || '';
+  data.clientSubmissionId = clientSubmissionId;
+  data.imageCount = selectedImages.length;
+  data.attachments = includeImages ? attachmentPayload() : [];
   data.updatedAt = new Date().toISOString();
   return data;
 }
@@ -478,6 +811,9 @@ function validate() {
   setDateFieldState(dateMessage);
   if (dateMessage) missing.push(dateMessage);
   if (!form.querySelector('[name="cards"]:checked')) missing.push('利用したカード');
+  if (imageProcessing) missing.push('画像の圧縮が終わるまで待ってください');
+  if (selectedImages.length > MAX_IMAGES) missing.push(`画像は最大${MAX_IMAGES}枚までです`);
+  if (totalSelectedImageBytes() > MAX_TOTAL_IMAGE_BYTES) missing.push('画像全体のファイルサイズを減らしてください');
   if (!idToken) missing.push('学校のGoogleアカウントでのログイン');
   return [...new Set(missing)];
 }
@@ -519,7 +855,11 @@ function confirmHtml(data) {
     ['次回最初にすること', data.next],
     ['先生に相談したいこと', data.help]
   );
-  return `<dl>${rows.map(([label, value]) => `<div class="confirm-row"><dt>${esc(label)}</dt><dd>${esc(value || '—')}</dd></div>`).join('')}</dl>`;
+  rows.push(['本日の記録画像', selectedImages.length ? `${selectedImages.length}枚` : 'なし']);
+  const imagePreview = selectedImages.length
+    ? `<section class="confirm-image-section"><h3>画像の確認</h3><div class="confirm-image-grid">${selectedImages.map((image, index) => `<figure><img src="${image.dataUrl}" alt="提出画像${index + 1}の確認"><figcaption>${esc(image.originalName)}<br>${esc(`${image.width}×${image.height}px／${formatBytes(image.size)}`)}</figcaption></figure>`).join('')}</div><p>氏名、顔、名札、通知、位置情報など、提出に不要な個人情報が写っていないか確認してください。</p></section>`
+    : '';
+  return `<dl>${rows.map(([label, value]) => `<div class="confirm-row"><dt>${esc(label)}</dt><dd>${esc(value || '—')}</dd></div>`).join('')}</dl>${imagePreview}`;
 }
 
 function showError(items) {
@@ -614,6 +954,7 @@ function submitToGas(data) {
   post.method = 'POST';
   post.action = config.webAppUrl;
   post.target = 'gas-submit-frame';
+  post.enctype = 'multipart/form-data';
   post.className = 'hidden';
   const fields = { action: 'submit', idToken, payload: JSON.stringify(data) };
   Object.entries(fields).forEach(([key, value]) => {
@@ -634,7 +975,7 @@ function submitToGas(data) {
     $('submit-log').disabled = false;
     $('submit-log').innerHTML = '<i class="fa-solid fa-paper-plane mr-2"></i>提出';
     showError(['送信処理は完了している可能性があります。「自分のログを見る」または先生のスプレッドシートで確認してから、再送信してください。']);
-  }, 20000);
+  }, 60000);
 }
 
 function clearActivityFields() {
@@ -645,11 +986,13 @@ function clearActivityFields() {
   });
   form.elements.dataType.value = '公式データ';
   setRecordDateFromIso(todayIsoInJapan());
+  clearSelectedImages();
   localStorage.removeItem(DRAFT_KEY);
 }
 
 function beginNewLog() {
   captureProfile(activeMode);
+  clientSubmissionId = createClientSubmissionId();
   clearActivityFields();
   $('success-overlay').classList.add('hidden');
   $('confirm-overlay').classList.add('hidden');
@@ -669,7 +1012,9 @@ window.addEventListener('message', event => {
     captureProfile(activeMode);
     localStorage.removeItem(DRAFT_KEY);
     $('confirm-overlay').classList.add('hidden');
-    $('success-message').textContent = `提出番号：${data.submissionId || ''}　先生のスプレッドシートに記録しました。`;
+    const imageMessage = Number(data.imageCount || 0) > 0 ? `画像${Number(data.imageCount)}枚をGoogle Driveへ保存しました。` : '添付画像はありません。';
+    const duplicateMessage = data.duplicate ? '同じ送信内容は重複登録せず、前回の提出結果を表示しています。' : '';
+    $('success-message').textContent = `提出番号：${data.submissionId || ''}　先生のスプレッドシートに記録しました。${imageMessage}${duplicateMessage}`;
     $('success-overlay').classList.remove('hidden');
   } else {
     showError([data.message || '送信に失敗しました']);
@@ -679,6 +1024,7 @@ window.addEventListener('message', event => {
 
 document.addEventListener('DOMContentLoaded', () => {
   const draft = loadJson(DRAFT_KEY, null);
+  clientSubmissionId = String(draft?.clientSubmissionId || '').trim() || createClientSubmissionId();
   const initialMode = draft?.mode || profiles.lastMode || 'グループ';
   applyMode(initialMode, { loadSaved: !draft });
   if (draft) {
@@ -686,6 +1032,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyMode(draft.mode || initialMode, { loadSaved: false });
   }
   initDateControls();
+  initImageControls();
 
   const query = new URLSearchParams(location.search);
   if (query.get('from') === 'advisor') advisorFill();
@@ -740,7 +1087,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('confirm-overlay').classList.add('hidden');
     document.body.style.overflow = '';
   };
-  $('submit-log').onclick = () => submitToGas(getData());
+  $('submit-log').onclick = () => submitToGas(getData({ includeImages: true }));
   $('new-log-after-submit').onclick = beginNewLog;
   $('close-success').onclick = () => {
     $('success-overlay').classList.add('hidden');

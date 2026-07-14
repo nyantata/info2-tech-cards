@@ -60,7 +60,7 @@ function init(){
   restoreLogin();
   if(!cfg.googleClientId||!cfg.webAppUrl){
     $('history-warning').classList.remove('hidden');
-    $('history-warning').textContent='Google連携はまだ設定されていません。先生が setup.html の手順で設定してください。';
+    $('history-warning').textContent='Google連携の設定を読み込めません。更新時に assets/gas-config.js が初期化または削除された可能性があります。以前の設定を復元するか、setup.html の手順で再設定してください。';
   }
   if(!cfg.googleClientId)return;
   const wait=()=>{
