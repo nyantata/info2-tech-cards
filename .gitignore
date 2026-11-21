@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+.private/
+work/
+attachments/
+.env
+.env.*
+!.env.example
+**/demo-credentials.js
+*パスワード*.csv
+*パスワード*.csv
+info2_tech_cards_v30_prototype*.html
