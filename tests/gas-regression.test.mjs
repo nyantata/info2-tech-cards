@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { gasEnvironment, gasSource, gasTest } from './support/gas-environment.mjs';
+import { gasEnvironment, baselineSource, gasTest } from './support/gas-environment.mjs';
 import { students, submission, image } from './fixtures/classroom.mjs';
 
-gasTest('受領したGAS v28.5の私有コピーが変更されていない', () => {
-  assert.equal(createHash('sha256').update(gasSource).digest('hex'), '3c5884197898a1cbb703255dbb08bf6430d6e971f7f85b306908da988019b439');
+test('受領したGAS v28.5の私有コピーが変更されていない', { skip: !baselineSource && 'Private baseline not supplied' }, () => {
+  assert.equal(createHash('sha256').update(baselineSource).digest('hex'), '3c5884197898a1cbb703255dbb08bf6430d6e971f7f85b306908da988019b439');
 });
 
 test('架空36名のID・sub・メールが一意で、本番接続情報を使わない', () => {

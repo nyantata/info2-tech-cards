@@ -3,7 +3,9 @@ import vm from 'node:vm';
 import nodeTest from 'node:test';
 import { students } from '../fixtures/classroom.mjs';
 
-const sourcePath = process.env.INFO2_GAS_SOURCE || new URL('../../.private/gas-v28.5.gs', import.meta.url);
+const baselinePath = new URL('../../.private/gas-v28.5.gs', import.meta.url);
+export const baselineSource = existsSync(baselinePath) ? readFileSync(baselinePath, 'utf8') : null;
+const sourcePath = process.env.INFO2_GAS_SOURCE || baselinePath;
 if (process.env.INFO2_GAS_SOURCE && !existsSync(sourcePath)) throw new Error('Explicit private GAS source path does not exist');
 export const gasSource = existsSync(sourcePath) ? readFileSync(sourcePath, 'utf8') : null;
 export function gasTest(name, optionsOrFn, maybeFn) {
@@ -13,19 +15,28 @@ export function gasTest(name, optionsOrFn, maybeFn) {
 }
 
 class Sheet {
-  constructor(book, name) { this.book = book; this.name = name; this.rows = []; this.writes = 0; }
+  constructor(book, name) { this.book = book; this.name = name; this.rows = []; this.writes = 0; this.formulas = new Map(); this.notes = new Map(); }
   getName() { return this.name; }
   getParent() { return this.book; }
-  getLastRow() { return this.rows.reduce((last, row, i) => row.some(v => v !== '' && v != null) ? i + 1 : last, 0); }
-  getLastColumn() { return Math.max(0, ...this.rows.map(row => row.length)); }
+  getLastRow() {
+    return Math.max(this.rows.reduce((last, row, i) => row.some(v => v !== '' && v != null) ? i + 1 : last, 0),
+      0, ...[...this.formulas.keys()].map(key => Number(key.split(',')[0])));
+  }
+  getLastColumn() { return this.rows.reduce((last, row) => Math.max(last, row.length), 0); }
+  getMaxColumns() { return Math.max(40, this.getLastColumn()); }
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   getRange(r, c, height = 1, width = 1) {
     const sheet = this;
     const values = () => Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => sheet.rows[r + y - 1]?.[c + x - 1] ?? ''));
+    const metadata = map => Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => map.get(`${r + y},${c + x}`) ?? ''));
     const range = {
       getValues: values,
       getDisplayValues: () => values().map(row => row.map(String)),
       getValue: () => values()[0][0],
+      getFormulas: () => metadata(sheet.formulas),
+      getNotes: () => metadata(sheet.notes),
+      setFormula(value) { sheet.formulas.set(`${r},${c}`, value); return range; },
+      setNote(value) { sheet.notes.set(`${r},${c}`, value); return range; },
       setValues(data) {
         sheet.writes++;
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -47,6 +58,16 @@ class Sheet {
   }
   insertColumnAfter(column) { this.rows.forEach(row => row.splice(column, 0, '')); this.writes++; }
   insertColumnBefore(column) { this.insertColumnAfter(column - 1); }
+  deleteRow(row) {
+    this.rows.splice(row - 1, 1); this.writes++;
+    for (const map of [this.formulas, this.notes]) {
+      const entries = [...map]; map.clear();
+      for (const [key, value] of entries) {
+        const [r, c] = key.split(',').map(Number);
+        if (r !== row) map.set(`${r > row ? r - 1 : r},${c}`, value);
+      }
+    }
+  }
   setFrozenRows() {}
   appendRow(row) { this.getRange(this.getLastRow() + 1, 1, 1, row.length).setValues([row]); }
 }
