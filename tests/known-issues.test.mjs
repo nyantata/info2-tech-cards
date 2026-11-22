@@ -6,7 +6,8 @@ import { gasEnvironment, gasTest } from './support/gas-environment.mjs';
 import { submission, image } from './fixtures/classroom.mjs';
 
 // Assertions describe the desired safe behavior. TODO is quarantine, NOT a pass.
-const known = id => process.env.INFO2_STRICT_KNOWN_ISSUES ? {} : { todo: id };
+const known = id => process.env.INFO2_STRICT_KNOWN_ISSUES ||
+  process.env.INFO2_EXPECT_ROW_FIXES && ['KI-02', 'KI-03'].includes(id) ? {} : { todo: id };
 
 gasTest('KI-01: 診断GETは教員認可前にDriveを変更しない', known('KI-01'), () => {
   const e = gasEnvironment(); e.c.doGet({ parameter: { action: 'diagnose' } });

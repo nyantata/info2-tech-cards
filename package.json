@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node scripts/run-tests.mjs",
     "test:strict": "node scripts/run-tests.mjs --strict",
+    "test:row-fix": "node scripts/run-tests.mjs --row-fix",
     "check:public": "node scripts/check-public-files.mjs",
     "check": "npm run check:public && npm test",
     "hooks:install": "git config core.hooksPath .githooks"
